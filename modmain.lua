@@ -4,11 +4,12 @@ local TheWorld = _G.TheWorld
 
 
 -- Act as tostring() but keeps integer form for integers or fixes 2 decimal places for floats
-local function display(number)
+local function display(number, decimal_place)
     if number % 1 == 0 then
         return tostring(number)
     end
-    return tostring(math.floor(number * 100) / 100)
+    local power_of_10 = math.pow(10, decimal_place or 2)
+    return tostring(math.floor(number * power_of_10) / power_of_10)
 end
 
 
@@ -42,12 +43,26 @@ _G.c_rr_restore = function(prefab)
 end
 
 
+-- Stop an object's brain
+-- It may work again under certain circumstances
+_G.c_rr_stopbrain = function(inst)
+    if inst and inst.brain then
+        inst.brain:Stop()
+    end
+end
+
+
 -- Spawn a dummy and track its health loss
 _G.c_rr_dummy = function(prefab, do_announce, maxhealth)
 	local inst = _G.SpawnPrefab(prefab)
     if not inst then return end
     inst.Transform:SetPosition(_G.ConsoleWorldPosition():Get())
-    inst.components.locomotor:SetExternalSpeedMultiplier(inst, "rr_speedmult", 0) 
+    inst.components.locomotor:SetExternalSpeedMultiplier(inst, "rr_speedmult", 0)
+    inst:DoTaskInTime(0, function()
+        if inst.brain then
+            inst.brain:Stop()
+        end
+    end)
     TheNet:Announce(string.format("Tracking health loss on prefab '%s'", prefab))
 
     local health = inst.components.health
@@ -89,21 +104,17 @@ _G.c_rr_dummy = function(prefab, do_announce, maxhealth)
 end
 
 
--- Stop an object's brain
--- It may work again under certain circumstances
-_G.c_rr_stopbrain = function(inst)
-    if inst and inst.brain then
-        inst.brain:Stop()
-    end
-end
-
-
 -- Spawn a dummy and track DPS done on it
 _G.c_rr_dpsdummy = function(prefab, dur, maxhealth)
 	local inst = _G.SpawnPrefab(prefab)
     if not inst then return end
     inst.Transform:SetPosition(_G.ConsoleWorldPosition():Get())
     inst.components.locomotor:SetExternalSpeedMultiplier(inst, "rr_speedmult", 0)
+    inst:DoTaskInTime(0, function()
+        if inst.brain then
+            inst.brain:Stop()
+        end
+    end)
     TheNet:Announce(string.format("Tracking DPS on prefab '%s'", prefab))
 
     local health = inst.components.health
@@ -183,4 +194,48 @@ _G.c_rr_scantable = function(table)
     for k, v in pairs(table) do
         TheNet:Announce(k .. ": " .. tostring(v))
     end
+end
+
+
+_G.c_rr_recorddistance = function(inst, dur)
+    if not inst then return end
+    local starting_x = inst:GetPosition().x
+    local starting_z = inst:GetPosition().z
+
+    inst.components.locomotor:SetExternalSpeedMultiplier(inst, "rr_speedmult", 0)
+    local duration = dur or 5
+
+
+    inst:DoTaskInTime(0, function()
+        TheNet:Announce(string.format("Preparing %s for speed recording. Releasing in 3 seconds...", inst.name))
+    end)
+    inst:DoTaskInTime(3, function()
+        inst.components.locomotor:SetExternalSpeedMultiplier(inst, "rr_speedmult", 1)
+    end)
+    if duration >= 4 then
+        inst:DoTaskInTime(duration, function()
+            TheNet:Announce("3...")
+        end)
+    end
+    if duration >= 3 then
+        inst:DoTaskInTime(duration + 1, function()
+            TheNet:Announce("2...")
+        end)
+    end
+    if duration >= 2 then
+        inst:DoTaskInTime(duration + 2, function()
+            TheNet:Announce("1...")
+        end)
+    end
+    inst:DoTaskInTime(duration + 3, function()
+        local dist_x = inst:GetPosition().x - starting_x
+        local dist_z = inst:GetPosition().z - starting_z
+        local total_dist = math.sqrt(dist_x * dist_x + dist_z * dist_z)
+        local speed = total_dist / duration
+        local default_speed = 5.9849
+        TheNet:Announce(string.format(
+            "Duration: %s seconds\nTotal distance traveled: %s unit(s)\nSpeed: %s unit/s\nSpeed Mult: %s",
+            duration, display(total_dist, 4), display(speed, 4), display(speed/default_speed, 3)
+        ))
+    end)
 end
